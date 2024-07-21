@@ -1,3 +1,5 @@
+use chumsky::container::Container;
+use chumsky::container::OrderedSeq;
 use chumsky::extra::Err;
 use chumsky::prelude::*;
 use chumsky::Parser;
@@ -7,38 +9,76 @@ use crate::expr::Expr;
 type Extra<'a> = Err<Rich<'a, char>>;
 
 pub fn parser<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> {
-    block().then_ignore(end())
+    block(expr()).then_ignore(end())
 }
 
-fn block<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
-    just('{').ignore_then(decl()).then_ignore(just('}'))
+fn block<'a>(
+    expr: impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone,
+) -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+    let stmts = stmt(expr)
+        .repeated()
+        .collect::<Vec<_>>()
+        .map(|stmts| Expr::Block { stmts });
+
+    lbrace().ignore_then(stmts).then_ignore(rbrace())
 }
 
-fn decl<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
-    recursive(|decl| {
-        let r#let = text::ascii::keyword("let")
-            .ignore_then(ident())
-            .then(just(':').ignore_then(ident()).or_not())
-            .then_ignore(just('='))
-            .then(expr())
-            .then_ignore(just(';'))
-            .then(decl.clone())
-            .map(|(((name, ty), rhs), then)| Expr::Let {
-                name,
-                ty,
-                rhs: rhs.boxed(),
-                then: Box::new(then),
-            });
+fn token<'a, T>(c: T) -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone
+where
+    T: OrderedSeq<'a, char> + Clone,
+{
+    just(c).padded().ignored()
+}
 
-        r#let
-            // Must be later in the chain than `r#let` to avoid ambiguity
-            .or(expr())
-            .padded()
-    })
+fn lbrace<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+    token('{')
+}
+
+fn rbrace<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+    token('}')
+}
+
+fn semi<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+    token(';')
+}
+
+fn colon<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+    token(':')
+}
+
+fn equals<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+    token('=')
+}
+
+fn stmt<'a>(
+    expr: impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone,
+) -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+    // TODO: pull into individual stmts, so that blocks don't need to be ; terminated
+    let end_of_statement = semi().or(rbrace().rewind());
+
+    choice((stmt_let(expr.clone()), expr)).then_ignore(end_of_statement)
+}
+
+fn stmt_let<'a>(
+    expr: impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone,
+) -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+    text::ascii::keyword("let")
+        .ignore_then(ident())
+        .then(colon().ignore_then(ident()).or_not())
+        .then_ignore(equals())
+        .then(expr)
+        .map(|((name, ty), rhs)| Expr::Let {
+            name,
+            ty,
+            rhs: rhs.boxed(),
+        })
+        .padded()
 }
 
 fn expr<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
     recursive(|expr| {
+        let block_expr = block(expr.clone());
+
         let parens_expr = expr
             .delimited_by(just('('), just(')'))
             .map(|expr: Expr| Expr::Parens(expr.boxed()))
@@ -49,7 +89,7 @@ fn expr<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
             name_span: extra.span(),
         });
 
-        let atom = choice((int(), parens_expr, var));
+        let atom = choice((block_expr, int(), parens_expr, var));
 
         let op = |c| just(c).padded();
 

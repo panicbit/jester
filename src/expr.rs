@@ -24,13 +24,15 @@ pub enum Expr<'a> {
         name: &'a str,
         ty: Option<&'a str>,
         rhs: Box<Expr<'a>>,
-        then: Box<Expr<'a>>,
     },
     Fn {
         name: &'a str,
         args: Vec<String>,
         body: Box<Expr<'a>>,
         then: Box<Expr<'a>>,
+    },
+    Block {
+        stmts: Vec<Expr<'a>>,
     },
 }
 

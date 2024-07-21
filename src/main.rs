@@ -15,12 +15,14 @@ use crate::expr::{Expr, Span};
 fn main() {
     let path = env::args().nth(1).unwrap();
     let input = fs::read_to_string(path).unwrap();
+    let source = Source::from(&input);
 
     let expr = match parser().parse(&input).into_result() {
         Ok(expr) => expr,
         Err(errs) => {
             for err in errs {
-                eprintln!("Error: {err:?}");
+                let report = report_parse_err(err);
+                report.print(source.clone());
             }
             return;
         }
@@ -31,7 +33,7 @@ fn main() {
     let js = match Trans::new(Span::new(0, input.len())).trans(&expr) {
         Ok(js) => js,
         Err(report) => {
-            report.print(Source::from(&input)).unwrap();
+            report.print(source).unwrap();
             return;
         }
     };
@@ -152,17 +154,11 @@ impl Trans {
             Expr::Mul(lhs, rhs) => JSExpr::Mul(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
             Expr::Div(lhs, rhs) => JSExpr::Div(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
             Expr::Call(_, _) => todo!(),
-            Expr::Let {
-                name,
-                ty,
-                rhs,
-                then,
-            } => {
+            Expr::Let { name, ty, rhs } => {
                 JSExpr::Let {
                     // order is significant
                     rhs: self.trans(rhs)?.boxed(),
                     name: self.declare_variable(name),
-                    then: self.trans(then)?.boxed(),
                 }
             }
             Expr::Fn {
@@ -171,6 +167,7 @@ impl Trans {
                 body,
                 then,
             } => todo!(),
+            Expr::Block { stmts } => todo!("block!"),
         })
     }
 }
@@ -196,7 +193,6 @@ enum JSExpr<'a> {
     Let {
         name: Cow<'a, str>,
         rhs: Box<JSExpr<'a>>,
-        then: Box<JSExpr<'a>>,
     },
     Parens(Box<JSExpr<'a>>),
     Var(Cow<'a, str>),
@@ -252,10 +248,7 @@ impl<'a> fmt::Display for DisplayJSExpr<'a> {
 
         match &self.expr {
             JSExpr::Number(n) => write!(f, "{n}"),
-            JSExpr::Let { name, rhs, then } => {
-                writeln!(f, "let {name} = {rhs};")?;
-                write!(f, "{then}")
-            }
+            JSExpr::Let { name, rhs } => writeln!(f, "let {name} = {rhs};"),
             JSExpr::Parens(expr) => write!(f, "({expr})"),
             JSExpr::Var(name) => write!(f, "{name}"),
             JSExpr::Neg(expr) => match **expr {
@@ -268,4 +261,17 @@ impl<'a> fmt::Display for DisplayJSExpr<'a> {
             JSExpr::Sub(lhs, rhs) => write!(f, "{lhs} - {rhs}"),
         }
     }
+}
+
+fn report_parse_err(err: chumsky::error::Rich<char>) -> Report<'static> {
+    let mut c = ColorGenerator::new();
+    let span = err.span();
+
+    Report::build(ReportKind::Error, (), span.start)
+        .with_label(
+            Label::new(span.into_range())
+                .with_message(format!("{}", err.reason()))
+                .with_color(c.next()),
+        )
+        .finish()
 }
