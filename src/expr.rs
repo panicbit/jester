@@ -8,7 +8,10 @@ pub enum Expr<'a> {
     // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER
     Int(i32),
     Parens(Box<Expr<'a>>),
-    Var(&'a str, Span),
+    Var {
+        name: &'a str,
+        name_span: Span,
+    },
 
     Neg(Box<Expr<'a>>),
     Add(Box<Expr<'a>>, Box<Expr<'a>>),
@@ -19,6 +22,7 @@ pub enum Expr<'a> {
     Call(String, Vec<Expr<'a>>),
     Let {
         name: &'a str,
+        ty: Option<&'a str>,
         rhs: Box<Expr<'a>>,
         then: Box<Expr<'a>>,
     },

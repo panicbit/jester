@@ -26,6 +26,8 @@ fn main() {
         }
     };
 
+    println!("{:#?}", expr);
+
     let js = match Trans::new(Span::new(0, input.len())).trans(&expr) {
         Ok(js) => js,
         Err(report) => {
@@ -134,7 +136,10 @@ impl Trans {
         Ok(match expr {
             Expr::Int(n) => JSExpr::Number((*n).into()),
             Expr::Parens(expr) => JSExpr::Parens(self.trans(expr)?.boxed()),
-            Expr::Var(name, span) => {
+            Expr::Var {
+                name,
+                name_span: span,
+            } => {
                 let name = self
                     .resolve_variable(name)
                     .ok_or_else(|| report_undeclared_variable(name, span))?;
@@ -147,7 +152,12 @@ impl Trans {
             Expr::Mul(lhs, rhs) => JSExpr::Mul(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
             Expr::Div(lhs, rhs) => JSExpr::Div(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
             Expr::Call(_, _) => todo!(),
-            Expr::Let { name, rhs, then } => {
+            Expr::Let {
+                name,
+                ty,
+                rhs,
+                then,
+            } => {
                 JSExpr::Let {
                     // order is significant
                     rhs: self.trans(rhs)?.boxed(),

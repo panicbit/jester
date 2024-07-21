@@ -4,22 +4,52 @@ use chumsky::Parser;
 
 use crate::expr::Expr;
 
-pub fn parser<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Err<Rich<'a, char>>> {
-    let ident = text::ascii::ident().padded();
+type Extra<'a> = Err<Rich<'a, char>>;
 
-    let expr = recursive(|expr| {
-        let int = text::int(10)
-            .map(|s: &str| Expr::Int(s.parse().unwrap()))
-            .padded();
+pub fn parser<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> {
+    block().then_ignore(end())
+}
 
+fn block<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+    just('{').ignore_then(decl()).then_ignore(just('}'))
+}
+
+fn decl<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+    recursive(|decl| {
+        let r#let = text::ascii::keyword("let")
+            .ignore_then(ident())
+            .then(just(':').ignore_then(ident()).or_not())
+            .then_ignore(just('='))
+            .then(expr())
+            .then_ignore(just(';'))
+            .then(decl.clone())
+            .map(|(((name, ty), rhs), then)| Expr::Let {
+                name,
+                ty,
+                rhs: rhs.boxed(),
+                then: Box::new(then),
+            });
+
+        r#let
+            // Must be later in the chain than `r#let` to avoid ambiguity
+            .or(expr())
+            .padded()
+    })
+}
+
+fn expr<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+    recursive(|expr| {
         let parens_expr = expr
             .delimited_by(just('('), just(')'))
             .map(|expr: Expr| Expr::Parens(expr.boxed()))
             .padded();
 
-        let var = ident.map_with(|name, extra| Expr::Var(name, extra.span()));
+        let var = ident().map_with(|name, extra| Expr::Var {
+            name,
+            name_span: extra.span(),
+        });
 
-        let atom = choice((int, parens_expr, var));
+        let atom = choice((int(), parens_expr, var));
 
         let op = |c| just(c).padded();
 
@@ -48,26 +78,15 @@ pub fn parser<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Err<Rich<'a, char>>> {
         );
 
         sum
-    });
+    })
+}
 
-    let decl = recursive(|decl| {
-        let r#let = text::ascii::keyword("let")
-            .ignore_then(ident)
-            .then_ignore(just('='))
-            .then(expr.clone())
-            .then_ignore(just(';'))
-            .then(decl.clone())
-            .map(|((name, rhs), then)| Expr::Let {
-                name,
-                rhs: rhs.boxed(),
-                then: Box::new(then),
-            });
+fn ident<'a>() -> impl Parser<'a, &'a str, &'a str, Extra<'a>> + Clone {
+    text::ascii::ident().padded()
+}
 
-        r#let
-            // Must be later in the chain than `r#let` to avoid ambiguity
-            .or(expr)
-            .padded()
-    });
-
-    decl.then_ignore(end())
+fn int<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+    text::int(10)
+        .map(|s: &str| Expr::Int(s.parse().unwrap()))
+        .padded()
 }
