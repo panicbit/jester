@@ -1,6 +1,8 @@
+#![allow(warnings)]
 #![allow(clippy::result_large_err)]
 
 mod expr;
+mod js;
 mod parser;
 
 use std::borrow::Cow;
@@ -134,10 +136,10 @@ impl Trans {
             .map(|variable| variable.js_name.as_str())
     }
 
-    fn trans<'a>(&mut self, expr: &'a Expr) -> Result<JSExpr<'a>, Report<'static>> {
+    fn trans<'a>(&mut self, expr: &'a Expr) -> Result<js::Expr<'a>, Report<'static>> {
         Ok(match expr {
-            Expr::Int(n) => JSExpr::Number((*n).into()),
-            Expr::Parens(expr) => JSExpr::Parens(self.trans(expr)?.boxed()),
+            Expr::Int(n) => js::Expr::Number((*n).into()),
+            Expr::Parens(expr) => js::Expr::Parens(self.trans(expr)?.boxed()),
             Expr::Var {
                 name,
                 name_span: span,
@@ -146,16 +148,24 @@ impl Trans {
                     .resolve_variable(name)
                     .ok_or_else(|| report_undeclared_variable(name, span))?;
 
-                JSExpr::Var(Cow::Owned(name.into()))
+                js::Expr::Var(Cow::Owned(name.into()))
             }
-            Expr::Neg(expr) => JSExpr::Neg(self.trans(expr)?.boxed()),
-            Expr::Add(lhs, rhs) => JSExpr::Add(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
-            Expr::Sub(lhs, rhs) => JSExpr::Sub(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
-            Expr::Mul(lhs, rhs) => JSExpr::Mul(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
-            Expr::Div(lhs, rhs) => JSExpr::Div(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed()),
+            Expr::Neg(expr) => js::Expr::Neg(self.trans(expr)?.boxed()),
+            Expr::Add(lhs, rhs) => {
+                js::Expr::Add(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+            }
+            Expr::Sub(lhs, rhs) => {
+                js::Expr::Sub(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+            }
+            Expr::Mul(lhs, rhs) => {
+                js::Expr::Mul(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+            }
+            Expr::Div(lhs, rhs) => {
+                js::Expr::Div(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+            }
             Expr::Call(_, _) => todo!(),
             Expr::Let { name, ty, rhs } => {
-                JSExpr::Let {
+                js::Expr::Let {
                     // order is significant
                     rhs: self.trans(rhs)?.boxed(),
                     name: self.declare_variable(name),
@@ -185,82 +195,6 @@ fn report_undeclared_variable(name: &str, span: &Span) -> Report<'static> {
         )
         .with_help(format!("Use `let {name} = …;`"))
         .finish()
-}
-
-#[derive(Debug)]
-enum JSExpr<'a> {
-    Number(f64),
-    Let {
-        name: Cow<'a, str>,
-        rhs: Box<JSExpr<'a>>,
-    },
-    Parens(Box<JSExpr<'a>>),
-    Var(Cow<'a, str>),
-    Neg(Box<JSExpr<'a>>),
-    Mul(Box<JSExpr<'a>>, Box<JSExpr<'a>>),
-    Div(Box<JSExpr<'a>>, Box<JSExpr<'a>>),
-    Add(Box<JSExpr<'a>>, Box<JSExpr<'a>>),
-    Sub(Box<JSExpr<'a>>, Box<JSExpr<'a>>),
-}
-
-impl JSExpr<'_> {
-    fn boxed(self) -> Box<Self> {
-        Box::new(self)
-    }
-}
-
-impl fmt::Display for JSExpr<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let expr = DisplayJSExpr {
-            indent: 0,
-            expr: self,
-        };
-
-        write!(f, "{expr}")
-    }
-}
-
-struct DisplayJSExpr<'a> {
-    indent: usize,
-    expr: &'a JSExpr<'a>,
-}
-
-impl<'a> DisplayJSExpr<'a> {
-    fn write_indent(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for _ in 0..self.indent {
-            write!(f, "    ")?;
-        }
-
-        Ok(())
-    }
-
-    fn with(&self, expr: &'a JSExpr<'a>) -> Self {
-        Self {
-            indent: self.indent,
-            expr,
-        }
-    }
-}
-
-impl<'a> fmt::Display for DisplayJSExpr<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.write_indent(f)?;
-
-        match &self.expr {
-            JSExpr::Number(n) => write!(f, "{n}"),
-            JSExpr::Let { name, rhs } => writeln!(f, "let {name} = {rhs};"),
-            JSExpr::Parens(expr) => write!(f, "({expr})"),
-            JSExpr::Var(name) => write!(f, "{name}"),
-            JSExpr::Neg(expr) => match **expr {
-                JSExpr::Neg(_) => write!(f, "-({expr})"),
-                _ => write!(f, "-{expr}"),
-            },
-            JSExpr::Mul(lhs, rhs) => write!(f, "{lhs} * {rhs}"),
-            JSExpr::Div(lhs, rhs) => write!(f, "{lhs} / {rhs}"),
-            JSExpr::Add(lhs, rhs) => write!(f, "{lhs} + {rhs}"),
-            JSExpr::Sub(lhs, rhs) => write!(f, "{lhs} - {rhs}"),
-        }
-    }
 }
 
 fn report_parse_err(err: chumsky::error::Rich<char>) -> Report<'static> {
