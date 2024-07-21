@@ -2,12 +2,47 @@ use std::borrow::Cow;
 use std::fmt;
 
 #[derive(Debug)]
+pub enum Stmt<'a> {
+    Let(Let<'a>),
+    Expr(Expr<'a>),
+    Block(Block<'a>),
+}
+
+impl fmt::Display for Stmt<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        DisplayJS::new(self).fmt(f)
+    }
+}
+
+impl<'a> fmt::Display for DisplayJS<'a, Stmt<'a>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.value {
+            Stmt::Let(let_stmt) => self.with(let_stmt).fmt(f),
+            Stmt::Expr(expr) => writeln!(f, "{}", self.with(expr)),
+            Stmt::Block(block) => self.with(block).fmt(f),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Let<'a> {
+    pub name: Cow<'a, str>,
+    pub rhs: Box<Expr<'a>>,
+}
+
+impl<'a> fmt::Display for DisplayJS<'a, Let<'a>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_indent(f)?;
+
+        let Let { name, rhs } = self.value;
+
+        writeln!(f, "let {name} = {rhs};")
+    }
+}
+
+#[derive(Debug)]
 pub enum Expr<'a> {
     Number(f64),
-    Let {
-        name: Cow<'a, str>,
-        rhs: Box<Expr<'a>>,
-    },
     Parens(Box<Expr<'a>>),
     Var(Cow<'a, str>),
     Neg(Box<Expr<'a>>),
@@ -25,21 +60,20 @@ impl Expr<'_> {
 
 impl fmt::Display for Expr<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let expr = DisplayJSExpr {
-            indent: 0,
-            expr: self,
-        };
-
-        write!(f, "{expr}")
+        DisplayJS::new(self).fmt(f)
     }
 }
 
-struct DisplayJSExpr<'a> {
+pub struct DisplayJS<'a, T: 'a> {
     indent: usize,
-    expr: &'a Expr<'a>,
+    value: &'a T,
 }
 
-impl<'a> DisplayJSExpr<'a> {
+impl<'a, T: 'a> DisplayJS<'a, T> {
+    pub fn new(value: &'a T) -> Self {
+        Self { indent: 0, value }
+    }
+
     pub fn write_indent(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for _ in 0..self.indent {
             write!(f, "    ")?;
@@ -48,21 +82,27 @@ impl<'a> DisplayJSExpr<'a> {
         Ok(())
     }
 
-    pub fn with(&self, expr: &'a Expr<'a>) -> Self {
-        Self {
+    pub fn with<'b, U: 'b>(&self, value: &'b U) -> DisplayJS<'b, U> {
+        DisplayJS {
             indent: self.indent,
-            expr,
+            value,
+        }
+    }
+
+    pub fn with_indented<'b, U: 'b>(&self, value: &'b U) -> DisplayJS<'b, U> {
+        DisplayJS {
+            indent: self.indent + 1,
+            value,
         }
     }
 }
 
-impl<'a> fmt::Display for DisplayJSExpr<'a> {
+impl<'a> fmt::Display for DisplayJS<'a, Expr<'a>> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.write_indent(f)?;
 
-        match &self.expr {
+        match &self.value {
             Expr::Number(n) => write!(f, "{n}"),
-            Expr::Let { name, rhs } => writeln!(f, "let {name} = {rhs};"),
             Expr::Parens(expr) => write!(f, "({expr})"),
             Expr::Var(name) => write!(f, "{name}"),
             Expr::Neg(expr) => match **expr {
@@ -74,5 +114,26 @@ impl<'a> fmt::Display for DisplayJSExpr<'a> {
             Expr::Add(lhs, rhs) => write!(f, "{lhs} + {rhs}"),
             Expr::Sub(lhs, rhs) => write!(f, "{lhs} - {rhs}"),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Block<'a> {
+    pub stmts: Vec<Stmt<'a>>,
+}
+
+impl<'a> fmt::Display for DisplayJS<'a, Block<'a>> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_indent(f)?;
+        writeln!(f, "{{");
+
+        for stmt in &self.value.stmts {
+            self.with_indented(stmt).fmt(f)?;
+        }
+
+        self.write_indent(f)?;
+        writeln!(f, "}}")?;
+
+        Ok(())
     }
 }

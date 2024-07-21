@@ -1,4 +1,3 @@
-#![allow(warnings)]
 #![allow(clippy::result_large_err)]
 
 mod expr;
@@ -13,6 +12,8 @@ use chumsky::Parser;
 use parser::parser;
 
 use crate::expr::{Expr, Span};
+use crate::js::DisplayJS;
+use crate::parser::{Block, Let, Stmt};
 
 fn main() {
     let path = env::args().nth(1).unwrap();
@@ -32,7 +33,7 @@ fn main() {
 
     println!("{:#?}", expr);
 
-    let js = match Trans::new(Span::new(0, input.len())).trans(&expr) {
+    let js = match Trans::new(Span::new(0, input.len())).trans_block(&expr) {
         Ok(js) => js,
         Err(report) => {
             report.print(source).unwrap();
@@ -40,7 +41,7 @@ fn main() {
         }
     };
 
-    println!("{js}");
+    println!("{}", DisplayJS::new(&js));
     // println!("{:#?}", js);
 }
 
@@ -136,10 +137,41 @@ impl Trans {
             .map(|variable| variable.js_name.as_str())
     }
 
-    fn trans<'a>(&mut self, expr: &'a Expr) -> Result<js::Expr<'a>, Report<'static>> {
+    fn trans_block<'a>(&mut self, block: &'a Block) -> Result<js::Block<'a>, Report<'static>> {
+        let stmts = block
+            .stmts
+            .iter()
+            .map(|stmt| self.trans_stmt(stmt))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(js::Block { stmts })
+    }
+
+    fn trans_stmt<'a>(&mut self, stmt: &'a Stmt) -> Result<js::Stmt<'a>, Report<'static>> {
+        Ok(match stmt {
+            Stmt::Let(Let {
+                name: _,
+                ty: _,
+                rhs,
+            }) if rhs.contains_block() => {
+                todo!("blocks in let not supported right now")
+            }
+            Stmt::Let(Let { name, ty, rhs }) => {
+                let name = self.declare_variable(name);
+
+                js::Stmt::Let(js::Let {
+                    name: name.into(),
+                    rhs: self.trans_expr(rhs)?.boxed(),
+                })
+            }
+            Stmt::Expr(expr) => js::Stmt::Expr(self.trans_expr(expr)?),
+        })
+    }
+
+    fn trans_expr<'a>(&mut self, expr: &'a Expr) -> Result<js::Expr<'a>, Report<'static>> {
         Ok(match expr {
             Expr::Int(n) => js::Expr::Number((*n).into()),
-            Expr::Parens(expr) => js::Expr::Parens(self.trans(expr)?.boxed()),
+            Expr::Parens(expr) => js::Expr::Parens(self.trans_expr(expr)?.boxed()),
             Expr::Var {
                 name,
                 name_span: span,
@@ -150,34 +182,27 @@ impl Trans {
 
                 js::Expr::Var(Cow::Owned(name.into()))
             }
-            Expr::Neg(expr) => js::Expr::Neg(self.trans(expr)?.boxed()),
+            Expr::Neg(expr) => js::Expr::Neg(self.trans_expr(expr)?.boxed()),
             Expr::Add(lhs, rhs) => {
-                js::Expr::Add(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+                js::Expr::Add(self.trans_expr(lhs)?.boxed(), self.trans_expr(rhs)?.boxed())
             }
             Expr::Sub(lhs, rhs) => {
-                js::Expr::Sub(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+                js::Expr::Sub(self.trans_expr(lhs)?.boxed(), self.trans_expr(rhs)?.boxed())
             }
             Expr::Mul(lhs, rhs) => {
-                js::Expr::Mul(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+                js::Expr::Mul(self.trans_expr(lhs)?.boxed(), self.trans_expr(rhs)?.boxed())
             }
             Expr::Div(lhs, rhs) => {
-                js::Expr::Div(self.trans(lhs)?.boxed(), self.trans(rhs)?.boxed())
+                js::Expr::Div(self.trans_expr(lhs)?.boxed(), self.trans_expr(rhs)?.boxed())
             }
             Expr::Call(_, _) => todo!(),
-            Expr::Let { name, ty, rhs } => {
-                js::Expr::Let {
-                    // order is significant
-                    rhs: self.trans(rhs)?.boxed(),
-                    name: self.declare_variable(name),
-                }
-            }
             Expr::Fn {
                 name,
                 args,
                 body,
                 then,
             } => todo!(),
-            Expr::Block { stmts } => todo!("block!"),
+            Expr::Block(block) => todo!("block!"),
         })
     }
 }
