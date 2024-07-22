@@ -1,8 +1,4 @@
-use chumsky::span::SimpleSpan;
-
-use crate::parser::{Block, Ident};
-
-pub type Span = SimpleSpan;
+use crate::syntax::{Block, Ident, Span};
 
 #[derive(Debug)]
 pub enum Expr<'a> {

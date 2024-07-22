@@ -1,49 +1,15 @@
-use std::ops;
-
-use chumsky::container::Container;
 use chumsky::container::OrderedSeq;
 use chumsky::extra::Err;
 use chumsky::prelude::*;
 use chumsky::Parser;
 
-use crate::expr::Expr;
+use crate::syntax::Block;
+use crate::syntax::Expr;
+use crate::syntax::Ident;
+use crate::syntax::Let;
+use crate::syntax::Stmt;
 
 type Extra<'a> = Err<Rich<'a, char>>;
-
-#[derive(Debug)]
-pub struct Ident<'a>(&'a str);
-
-impl<'a> Ident<'a> {
-    pub fn as_str(&self) -> &'a str {
-        &self.0
-    }
-}
-
-impl<'a> ops::Deref for Ident<'a> {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(Debug)]
-pub struct Block<'a> {
-    pub stmts: Vec<Stmt<'a>>,
-}
-
-#[derive(Debug)]
-pub enum Stmt<'a> {
-    Let(Let<'a>),
-    Expr(Expr<'a>),
-}
-
-#[derive(Debug)]
-pub struct Let<'a> {
-    pub name: Ident<'a>,
-    pub ty: Option<Ident<'a>>,
-    pub rhs: Expr<'a>,
-}
 
 pub fn parser<'a>() -> impl Parser<'a, &'a str, Block<'a>, Extra<'a>> + Clone {
     block(expr()).then_ignore(end())
@@ -105,7 +71,7 @@ fn stmt_let<'a>(
         .then(colon().ignore_then(ident()).or_not())
         .then_ignore(equals())
         .then(expr)
-        .map(|((name, ty), rhs)| Stmt::Let(Let { name, ty, rhs: rhs }))
+        .map(|((name, ty), rhs)| Stmt::Let(Let { name, ty, rhs }))
         .padded()
 }
 
@@ -157,7 +123,7 @@ fn expr<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
 }
 
 fn ident<'a>() -> impl Parser<'a, &'a str, Ident<'a>, Extra<'a>> + Clone {
-    text::ascii::ident().padded().map(Ident)
+    text::ascii::ident().padded().map(Ident::new)
 }
 
 fn int<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
