@@ -1,27 +1,19 @@
-#![allow(clippy::result_large_err)]
-
-mod js;
-mod parser;
-mod report;
-mod syntax;
-mod trans;
-
 use std::{env, fs};
 
 use ariadne::Source;
 use chumsky::Parser;
-use parser::parser;
 
-use crate::js::Display;
-use crate::syntax::Span;
-use crate::trans::Trans;
+use jester_script::js::Display;
+use jester_script::syntax::Span;
+use jester_script::trans::Trans;
+use jester_script::{parser, report};
 
 fn main() {
     let path = env::args().nth(1).unwrap();
     let input = fs::read_to_string(path).unwrap();
     let source = Source::from(&input);
 
-    let expr = match parser().parse(&input).into_result() {
+    let expr = match parser::file().parse(&input).into_result() {
         Ok(expr) => expr,
         Err(errs) => {
             for err in errs {
