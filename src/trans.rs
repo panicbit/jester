@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use ariadne::Report;
 
-use crate::syntax::{Block, Expr, Let, Span, Stmt};
+use crate::syntax::{Block, Expr, File, Fn, Item, Let, Span, Stmt};
 use crate::{js, report};
 
 pub struct Trans {
@@ -33,6 +33,42 @@ impl Trans {
             .flat_map(|scope| scope.variables.iter().rev())
             .find(|variable| variable.jester_name == jester_name)
             .map(|variable| variable.js_name.as_str())
+    }
+
+    pub fn trans_file<'a>(&mut self, file: &'a File) -> Result<js::File<'a>, Report<'static>> {
+        let stmts = file
+            .items
+            .iter()
+            .map(|item| self.trans_item(item))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(js::File { stmts })
+    }
+
+    pub fn trans_item<'a>(&mut self, item: &'a Item) -> Result<js::Stmt<'a>, Report<'static>> {
+        match item {
+            Item::Fn(r#fn) => self.trans_fn(r#fn),
+        }
+    }
+
+    pub fn trans_fn<'a>(&mut self, r#fn: &'a Fn) -> Result<js::Stmt<'a>, Report<'static>> {
+        Ok(js::Stmt::Fn(js::Fn {
+            name: &r#fn.name,
+            args: r#fn.args.iter().map(|arg| arg.name.as_str()).collect(),
+            body: {
+                self.scopes.push(Scope::new(Span::splat(0)));
+
+                for arg in &r#fn.args {
+                    // TODO: do not apply shadowing logic ("x" -> "x__2")
+                    self.declare_variable(&arg.name);
+                }
+
+                let body = self.trans_block(&r#fn.body)?;
+                self.scopes.pop();
+
+                body
+            },
+        }))
     }
 
     pub fn trans_block<'a>(&mut self, block: &'a Block) -> Result<js::Block<'a>, Report<'static>> {

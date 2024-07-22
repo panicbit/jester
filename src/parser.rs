@@ -3,9 +3,13 @@ use chumsky::extra::Err;
 use chumsky::prelude::*;
 use chumsky::Parser as _;
 
+use crate::syntax::r#fn;
 use crate::syntax::Block;
 use crate::syntax::Expr;
+use crate::syntax::File;
+use crate::syntax::Fn;
 use crate::syntax::Ident;
+use crate::syntax::Item;
 use crate::syntax::Let;
 use crate::syntax::Stmt;
 
@@ -15,8 +19,43 @@ pub trait Parser<'a, O>: chumsky::Parser<'a, &'a str, O, Extra<'a>> + Clone {}
 
 impl<'a, O, T> Parser<'a, O> for T where T: chumsky::Parser<'a, &'a str, O, Extra<'a>> + Clone {}
 
-pub fn file<'a>() -> impl Parser<'a, Block<'a>> {
-    block(expr()).then_ignore(end())
+pub fn file<'a>() -> impl Parser<'a, File<'a>> {
+    item()
+        .repeated()
+        .collect::<Vec<_>>()
+        .then_ignore(end())
+        .map(|items| File { items })
+}
+
+fn item<'a>() -> impl Parser<'a, Item<'a>> {
+    r#fn().map(Item::Fn)
+}
+
+fn r#fn<'a>() -> impl Parser<'a, Fn<'a>> {
+    let name = ident();
+    let arg = ident()
+        .then_ignore(token(':'))
+        .then(r#type())
+        .map(|(name, r#type)| r#fn::Arg { name, r#type });
+    let args = arg
+        .separated_by(token(','))
+        .allow_trailing()
+        .collect::<Vec<_>>();
+    let return_value = token("->").ignore_then(r#type()).or_not().labelled("->");
+    let body = block(expr());
+
+    token("fn")
+        .labelled("fn")
+        .ignore_then(name)
+        .then(args.delimited_by(token('('), token(')')))
+        .then(return_value)
+        .then(body)
+        .map(|(((name, args), return_type), body)| Fn {
+            name,
+            args,
+            return_type,
+            body,
+        })
 }
 
 fn block<'a>(expr: impl Parser<'a, Expr<'a>>) -> impl Parser<'a, Block<'a>> {
@@ -121,7 +160,14 @@ fn expr<'a>() -> impl Parser<'a, Expr<'a>> {
 }
 
 fn ident<'a>() -> impl Parser<'a, Ident<'a>> {
-    text::ascii::ident().padded().map(Ident::new)
+    text::ascii::ident()
+        .padded()
+        .map(Ident::new)
+        .labelled("identifier")
+}
+
+fn r#type<'a>() -> impl Parser<'a, Ident<'a>> {
+    ident().labelled("type")
 }
 
 fn int<'a>() -> impl Parser<'a, Expr<'a>> {

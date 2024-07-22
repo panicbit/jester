@@ -13,8 +13,8 @@ fn main() {
     let input = fs::read_to_string(path).unwrap();
     let source = Source::from(&input);
 
-    let expr = match parser::file().parse(&input).into_result() {
-        Ok(expr) => expr,
+    let file = match parser::file().parse(&input).into_result() {
+        Ok(file) => file,
         Err(errs) => {
             for err in errs {
                 let report = report::parse_err(err);
@@ -24,9 +24,9 @@ fn main() {
         }
     };
 
-    println!("{:#?}", expr);
+    println!("{:#?}", file);
 
-    let js = match Trans::new(Span::new(0, input.len())).trans_block(&expr) {
+    let js = match Trans::new(Span::new(0, input.len())).trans_file(&file) {
         Ok(js) => js,
         Err(report) => {
             report.print(source).unwrap();
