@@ -1,7 +1,7 @@
 use chumsky::container::OrderedSeq;
 use chumsky::extra::Err;
 use chumsky::prelude::*;
-use chumsky::Parser;
+use chumsky::Parser as _;
 
 use crate::syntax::Block;
 use crate::syntax::Expr;
@@ -11,13 +11,15 @@ use crate::syntax::Stmt;
 
 type Extra<'a> = Err<Rich<'a, char>>;
 
-pub fn parser<'a>() -> impl Parser<'a, &'a str, Block<'a>, Extra<'a>> + Clone {
+pub trait Parser<'a, O>: chumsky::Parser<'a, &'a str, O, Extra<'a>> + Clone {}
+
+impl<'a, O, T> Parser<'a, O> for T where T: chumsky::Parser<'a, &'a str, O, Extra<'a>> + Clone {}
+
+pub fn file<'a>() -> impl Parser<'a, Block<'a>> {
     block(expr()).then_ignore(end())
 }
 
-fn block<'a>(
-    expr: impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone,
-) -> impl Parser<'a, &'a str, Block<'a>, Extra<'a>> + Clone {
+fn block<'a>(expr: impl Parser<'a, Expr<'a>>) -> impl Parser<'a, Block<'a>> {
     let stmts = stmt(expr).repeated().collect::<Vec<_>>();
 
     lbrace()
@@ -26,36 +28,34 @@ fn block<'a>(
         .map(|stmts| Block { stmts })
 }
 
-fn token<'a, T>(c: T) -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone
+fn token<'a, T>(c: T) -> impl Parser<'a, ()>
 where
     T: OrderedSeq<'a, char> + Clone,
 {
     just(c).padded().ignored()
 }
 
-fn lbrace<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+fn lbrace<'a>() -> impl Parser<'a, ()> {
     token('{')
 }
 
-fn rbrace<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+fn rbrace<'a>() -> impl Parser<'a, ()> {
     token('}')
 }
 
-fn semi<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+fn semi<'a>() -> impl Parser<'a, ()> {
     token(';')
 }
 
-fn colon<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+fn colon<'a>() -> impl Parser<'a, ()> {
     token(':')
 }
 
-fn equals<'a>() -> impl Parser<'a, &'a str, (), Extra<'a>> + Clone {
+fn equals<'a>() -> impl Parser<'a, ()> {
     token('=')
 }
 
-fn stmt<'a>(
-    expr: impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone,
-) -> impl Parser<'a, &'a str, Stmt<'a>, Extra<'a>> + Clone {
+fn stmt<'a>(expr: impl Parser<'a, Expr<'a>>) -> impl Parser<'a, Stmt<'a>> {
     // TODO: pull into individual stmts, so that blocks don't need to be ; terminated
     let end_of_statement = semi().or(rbrace().rewind());
     let expr_stmt = expr.clone().map(Stmt::Expr);
@@ -63,9 +63,7 @@ fn stmt<'a>(
     choice((stmt_let(expr), expr_stmt)).then_ignore(end_of_statement)
 }
 
-fn stmt_let<'a>(
-    expr: impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone,
-) -> impl Parser<'a, &'a str, Stmt<'a>, Extra<'a>> + Clone {
+fn stmt_let<'a>(expr: impl Parser<'a, Expr<'a>>) -> impl Parser<'a, Stmt<'a>> {
     text::ascii::keyword("let")
         .ignore_then(ident())
         .then(colon().ignore_then(ident()).or_not())
@@ -75,7 +73,7 @@ fn stmt_let<'a>(
         .padded()
 }
 
-fn expr<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+fn expr<'a>() -> impl Parser<'a, Expr<'a>> {
     recursive(|expr| {
         let parenthized = expr
             .clone()
@@ -122,11 +120,11 @@ fn expr<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
     })
 }
 
-fn ident<'a>() -> impl Parser<'a, &'a str, Ident<'a>, Extra<'a>> + Clone {
+fn ident<'a>() -> impl Parser<'a, Ident<'a>> {
     text::ascii::ident().padded().map(Ident::new)
 }
 
-fn int<'a>() -> impl Parser<'a, &'a str, Expr<'a>, Extra<'a>> + Clone {
+fn int<'a>() -> impl Parser<'a, Expr<'a>> {
     text::int(10)
         .map(|s: &str| Expr::Int(s.parse().unwrap()))
         .padded()
