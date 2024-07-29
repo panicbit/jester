@@ -1,5 +1,6 @@
 use chumsky::container::OrderedSeq;
 use chumsky::extra::Err;
+use chumsky::extra::Full;
 use chumsky::prelude::*;
 use chumsky::Parser as _;
 
@@ -13,7 +14,10 @@ use crate::syntax::Item;
 use crate::syntax::Let;
 use crate::syntax::Stmt;
 
-type Extra<'a> = Err<Rich<'a, char>>;
+type Extra<'a> = Full<Error<'a>, State, Context>;
+type Error<'a> = Rich<'a, char>;
+type State = ();
+type Context = ();
 
 pub trait Parser<'a, O>: chumsky::Parser<'a, &'a str, O, Extra<'a>> + Clone {}
 
